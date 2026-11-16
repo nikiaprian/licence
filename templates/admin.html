@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daftar lisensi</title>
+  <style>
+    body { margin: 0; font-family: Segoe UI, sans-serif; background: #f4f1ea; color: #1c1915; }
+    header, main { max-width: 60rem; margin: 0 auto; padding: 1rem 1.25rem; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.35rem; margin: 0; }
+    h2 { font-size: 1rem; margin: 0 0 0.75rem; }
+    button, .link { font: inherit; cursor: pointer; }
+    header button { background: transparent; border: 1px solid #1c1915; padding: 0.35rem 0.7rem; }
+    .card { background: #fff; border: 1px solid #e4dccb; padding: 1rem; margin-bottom: 1rem; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; }
+    label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; }
+    input, select { padding: 0.4rem 0.5rem; border: 1px solid #cfc6b6; font: inherit; }
+    .primary { background: #1c1915; color: #fff; border: 0; padding: 0.45rem 0.8rem; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { text-align: left; padding: 0.55rem 0.5rem; border-bottom: 1px solid #eee6d8; vertical-align: middle; font-size: 0.92rem; }
+    th { font-size: 0.75rem; letter-spacing: 0.03em; color: #5c564c; }
+    .off { color: #8a2b1d; }
+    .on { color: #1d6b3a; }
+    .msg { background: #e7f3ea; padding: 0.55rem 0.7rem; margin-bottom: 1rem; }
+    form.inline { display: flex; gap: 0.35rem; align-items: center; }
+    .empty { padding: 1rem; background: #fff; border: 1px solid #e4dccb; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Lisensi EA</h1>
+    <form method="post" action="/logout"><button type="submit">Keluar</button></form>
+  </header>
+  <main>
+    {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
+    <section class="card">
+      <h2>Tambah atau perbarui akun</h2>
+      <form method="post" action="/admin/licenses" class="row">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label>Nomor akun
+          <input name="account" inputmode="numeric" pattern="[0-9]+" required>
+        </label>
+        <label>Produk
+          <select name="product">
+            <option value="btcusd">BTCUSD</option>
+            <option value="xau">XAU</option>
+            <option value="both">Keduanya</option>
+          </select>
+        </label>
+        <label>Berlaku sampai
+          <input name="expires" type="date" required value="{{.Today}}">
+        </label>
+        <label>Catatan
+          <input name="note" maxlength="200">
+        </label>
+        <button class="primary" type="submit">Simpan</button>
+      </form>
+    </section>
+
+    {{if .Licenses}}
+    <table>
+      <thead>
+        <tr>
+          <th>Akun</th>
+          <th>Produk</th>
+          <th>Sampai</th>
+          <th>Status</th>
+          <th>Server terakhir</th>
+          <th>Catatan</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Licenses}}
+        <tr>
+          <td>{{.Account}}</td>
+          <td>{{.ProductLabel}}</td>
+          <td>{{.Expires}}</td>
+          <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
+          <td>{{.ServerName}}</td>
+          <td>{{.Note}}</td>
+          <td>
+            <form method="post" action="/admin/licenses/extend" class="inline">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <input name="expires" type="date" value="{{.Expires}}" required>
+              <button type="submit">Perpanjang</button>
+            </form>
+            {{if .Active}}
+            <form method="post" action="/admin/licenses/disable" class="inline">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit">Matikan</button>
+            </form>
+            {{else}}
+            <form method="post" action="/admin/licenses/enable" class="inline">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit">Aktifkan</button>
+            </form>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty">Belum ada akun terdaftar.</p>
+    {{end}}
+  </main>
+</body>
+</html>

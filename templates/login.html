@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Masuk — Lisensi EA</title>
+  <style>
+    body { margin: 0; font-family: Segoe UI, sans-serif; background: #f4f1ea; color: #1c1915; }
+    main { max-width: 22rem; margin: 12vh auto; padding: 1.5rem; background: #fff; border: 1px solid #e4dccb; }
+    h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
+    p { margin: 0 0 1rem; color: #5c564c; font-size: 0.9rem; }
+    label { display: block; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    input { width: 100%; box-sizing: border-box; padding: 0.5rem 0.6rem; border: 1px solid #cfc6b6; font: inherit; }
+    button { margin-top: 0.9rem; padding: 0.5rem 0.9rem; border: 0; background: #1c1915; color: #fff; font: inherit; cursor: pointer; }
+    .err { background: #fde8e4; color: #8a2b1d; padding: 0.5rem 0.6rem; margin-bottom: 0.8rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Lisensi EA</h1>
+    <p>Masuk untuk mengelola nomor akun yang boleh menjalankan EA.</p>
+    {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
+    <form method="post" action="/login">
+      <label for="password">Kata sandi admin</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Masuk</button>
+    </form>
+  </main>
+</body>
+</html>
