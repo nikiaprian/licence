@@ -2,7 +2,7 @@ services:
   license:
     build: .
     ports:
-      - "${PORT:-8080}:8080"
+      - "${PORT:-39217}:8080"
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?isi ADMIN_PASSWORD di file .env}
       EA_API_TOKEN: ${EA_API_TOKEN:?isi EA_API_TOKEN di file .env}
