@@ -3,110 +3,146 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Daftar lisensi</title>
+  <title>Admin — user</title>
   <style>
     body { margin: 0; font-family: Segoe UI, sans-serif; background: #f4f1ea; color: #1c1915; }
-    header, main { max-width: 60rem; margin: 0 auto; padding: 1rem 1.25rem; }
+    header, main { max-width: 76rem; margin: 0 auto; padding: 1rem 1.25rem; }
     header { display: flex; justify-content: space-between; align-items: center; }
     h1 { font-size: 1.35rem; margin: 0; }
-    h2 { font-size: 1rem; margin: 0 0 0.75rem; }
-    button, .link { font: inherit; cursor: pointer; }
+    h2 { font-size: 1.05rem; margin: 0; }
+    button { font: inherit; cursor: pointer; }
     header button { background: transparent; border: 1px solid #1c1915; padding: 0.35rem 0.7rem; }
     .card { background: #fff; border: 1px solid #e4dccb; padding: 1rem; margin-bottom: 1rem; }
-    .row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; }
+    .head { display: flex; justify-content: space-between; gap: 0.8rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.8rem; }
+    .row, .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
     label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; }
     input, select { padding: 0.4rem 0.5rem; border: 1px solid #cfc6b6; font: inherit; }
     .primary { background: #1c1915; color: #fff; border: 0; padding: 0.45rem 0.8rem; }
-    table { width: 100%; border-collapse: collapse; background: #fff; }
-    th, td { text-align: left; padding: 0.55rem 0.5rem; border-bottom: 1px solid #eee6d8; vertical-align: middle; font-size: 0.92rem; }
-    th { font-size: 0.75rem; letter-spacing: 0.03em; color: #5c564c; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.45rem 0.4rem; border-bottom: 1px solid #eee6d8; font-size: 0.9rem; }
+    th { font-size: 0.75rem; color: #5c564c; }
     .off { color: #8a2b1d; }
     .on { color: #1d6b3a; }
     .msg { background: #e7f3ea; padding: 0.55rem 0.7rem; margin-bottom: 1rem; }
+    .meta { margin: 0.15rem 0 0; color: #5c564c; font-size: 0.8rem; }
+    .empty { color: #5c564c; margin: 0; }
     form.inline { display: flex; gap: 0.35rem; align-items: center; }
-    .empty { padding: 1rem; background: #fff; border: 1px solid #e4dccb; }
   </style>
 </head>
 <body>
   <header>
-    <h1>Lisensi EA</h1>
+    <h1>Admin</h1>
     <form method="post" action="/logout"><button type="submit">Keluar</button></form>
   </header>
   <main>
     {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
     <section class="card">
-      <h2>Tambah atau perbarui akun</h2>
-      <form method="post" action="/admin/licenses" class="row">
+      <h2>Tambah user</h2>
+      <form method="post" action="/admin/users" class="row" style="margin-top: 0.8rem;">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <label>Nomor akun
-          <input name="account" inputmode="numeric" pattern="[0-9]+" required>
+        <label>Username
+          <input name="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]+" required>
         </label>
-        <label>Produk
-          <select name="product">
-            <option value="btcusd">BTCUSD</option>
-            <option value="xau">XAU</option>
-            <option value="both">Keduanya</option>
-          </select>
+        <label>Kata sandi
+          <input name="password" type="password" minlength="6" maxlength="72" required>
         </label>
-        <label>Berlaku sampai
-          <input name="expires" type="date" required value="{{.Today}}">
-        </label>
-        <label>Catatan
-          <input name="note" maxlength="200">
-        </label>
-        <button class="primary" type="submit">Simpan</button>
+        <button class="primary" type="submit">Buat</button>
       </form>
     </section>
 
-    {{if .Licenses}}
-    <table>
-      <thead>
-        <tr>
-          <th>Akun</th>
-          <th>Produk</th>
-          <th>Sampai</th>
-          <th>Status</th>
-          <th>Server terakhir</th>
-          <th>Catatan</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Licenses}}
-        <tr>
-          <td>{{.Account}}</td>
-          <td>{{.ProductLabel}}</td>
-          <td>{{.Expires}}</td>
-          <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
-          <td>{{.ServerName}}</td>
-          <td>{{.Note}}</td>
-          <td>
-            <form method="post" action="/admin/licenses/extend" class="inline">
+    {{if .Unassigned}}
+    <section class="card">
+      <h2>Lisensi belum punya user</h2>
+      <p class="meta">Akun ini ada sebelum halaman user. Pindahkan ke user agar muncul di halaman mereka.</p>
+      <table>
+        <thead>
+          <tr><th>Akun</th><th>Produk</th><th>Sampai</th><th>Status</th><th>Profit</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .Unassigned}}
+          <tr>
+            <td>{{.Account}}</td>
+            <td>{{.ProductLabel}}</td>
+            <td>{{.Expires}}</td>
+            <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
+            <td class="{{.ProfitClass}}">{{.ProfitText}}</td>
+            <td>
+              {{if $.Users}}
+              <form method="post" action="/admin/licenses/assign" class="inline">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <select name="user_id" required>
+                  {{range $.Users}}<option value="{{.ID}}">{{.Username}}</option>{{end}}
+                </select>
+                <button type="submit">Pindahkan</button>
+              </form>
+              {{else}}
+              <span class="meta">Buat user dulu.</span>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </section>
+    {{end}}
+
+    {{if .Users}}
+      {{range .Users}}
+      <section class="card">
+        <div class="head">
+          <div>
+            <h2>{{.Username}}</h2>
+            <p class="meta">Dibuat {{.CreatedLabel}}</p>
+          </div>
+          <div class="actions">
+            <form method="post" action="/admin/impersonate">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
               <input type="hidden" name="id" value="{{.ID}}">
-              <input name="expires" type="date" value="{{.Expires}}" required>
-              <button type="submit">Perpanjang</button>
+              <button class="primary" type="submit">Masuk sebagai user</button>
             </form>
-            {{if .Active}}
-            <form method="post" action="/admin/licenses/disable" class="inline">
+            <form method="post" action="/admin/users/delete" onsubmit="return confirm('Hapus user ini beserta semua lisensinya? EA pada akun tersebut akan berhenti.');">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
               <input type="hidden" name="id" value="{{.ID}}">
-              <button type="submit">Matikan</button>
+              <button type="submit">Hapus</button>
             </form>
-            {{else}}
-            <form method="post" action="/admin/licenses/enable" class="inline">
-              <input type="hidden" name="csrf" value="{{$.CSRF}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button type="submit">Aktifkan</button>
-            </form>
+          </div>
+        </div>
+        <form method="post" action="/admin/users/password" class="row">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <label>Kata sandi baru
+            <input name="password" type="password" minlength="6" maxlength="72" required>
+          </label>
+          <button type="submit">Ubah sandi</button>
+        </form>
+        {{if .Licenses}}
+        <table style="margin-top: 0.9rem;">
+          <thead>
+            <tr><th>Akun</th><th>Produk</th><th>Sampai</th><th>Status</th><th>Profit harian</th><th>Dikirim</th><th>Server</th><th>Catatan</th></tr>
+          </thead>
+          <tbody>
+            {{range .Licenses}}
+            <tr>
+              <td>{{.Account}}</td>
+              <td>{{.ProductLabel}}</td>
+              <td>{{.Expires}}</td>
+              <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
+              <td class="{{.ProfitClass}}">{{.ProfitText}}{{if .ProfitDay}}<span class="meta"> {{.ProfitDay}}</span>{{end}}</td>
+              <td>{{.ProfitWhen}}</td>
+              <td>{{.ServerName}}</td>
+              <td>{{.Note}}</td>
+            </tr>
             {{end}}
-          </td>
-        </tr>
+          </tbody>
+        </table>
+        {{else}}
+        <p class="empty" style="margin-top: 0.8rem;">Belum ada lisensi.</p>
         {{end}}
-      </tbody>
-    </table>
+      </section>
+      {{end}}
     {{else}}
-    <p class="empty">Belum ada akun terdaftar.</p>
+    <p class="empty">Belum ada user.</p>
     {{end}}
   </main>
 </body>
