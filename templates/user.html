@@ -30,6 +30,11 @@
     .table-wrap { overflow-x: auto; }
     .sub { display: block; margin-top: 0.15rem; font-size: 0.75rem; color: #5c564c; }
     a.reset { align-self: center; color: #1c1915; font-size: 0.85rem; }
+    .filter-bar { display: flex; justify-content: space-between; align-items: end; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+    .filter-bar form { margin: 0; }
+    .total { margin-left: auto; text-align: right; }
+    .total span { display: block; font-size: 0.75rem; color: #5c564c; }
+    .total strong { font-size: 1.35rem; }
   </style>
 </head>
 <body>
@@ -78,7 +83,8 @@
     {{end}}
 
     {{if .Licenses}}
-    <form method="get" action="/user" class="row" style="margin-bottom: 0.8rem;">
+    <div class="filter-bar">
+    <form method="get" action="/user" class="row">
       <label>Dari
         <input type="date" name="from" value="{{.From}}">
       </label>
@@ -88,6 +94,11 @@
       <button type="submit">Tampilkan</button>
       {{if or .From .To}}<a class="reset" href="/user">Semua riwayat</a>{{end}}
     </form>
+    <div class="total">
+      <span>Total semua akun</span>
+      <strong class="{{.TotalClass}}">{{.TotalText}}</strong>
+    </div>
+    </div>
     <div class="table-wrap">
     <table>
       <thead>

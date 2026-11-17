@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"log"
@@ -410,6 +411,8 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		"CanAdd":        sess.Impersonating || user.CanAdd,
 		"From":          from,
 		"To":            to,
+		"TotalText":     profitTotalText(rows),
+		"TotalClass":    profitTotalClass(rows),
 	})
 }
 
@@ -443,6 +446,51 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		"From":       from,
 		"To":         to,
 	})
+}
+
+func profitTotalText(rows []License) string {
+	sums := map[string]float64{}
+	var order []string
+	for _, row := range rows {
+		if row.ProfitAt == "" {
+			continue
+		}
+		if _, ok := sums[row.ProfitCurrency]; !ok {
+			order = append(order, row.ProfitCurrency)
+		}
+		sums[row.ProfitCurrency] += row.Profit
+	}
+	if len(order) == 0 {
+		return "—"
+	}
+	parts := make([]string, 0, len(order))
+	for _, cur := range order {
+		text := fmt.Sprintf("%.2f", sums[cur])
+		if cur != "" {
+			text += " " + cur
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func profitTotalClass(rows []License) string {
+	var sum float64
+	var any bool
+	for _, row := range rows {
+		if row.ProfitAt == "" {
+			continue
+		}
+		any = true
+		sum += row.Profit
+	}
+	if !any {
+		return ""
+	}
+	if sum < 0 {
+		return "off"
+	}
+	return "on"
 }
 
 func profitFilter(q map[string][]string) (string, string) {
