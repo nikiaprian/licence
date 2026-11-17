@@ -29,6 +29,7 @@
     .empty { padding: 1rem; background: #fff; border: 1px solid #e4dccb; }
     .table-wrap { overflow-x: auto; }
     .sub { display: block; margin-top: 0.15rem; font-size: 0.75rem; color: #5c564c; }
+    a.reset { align-self: center; color: #1c1915; font-size: 0.85rem; }
   </style>
 </head>
 <body>
@@ -50,6 +51,7 @@
     </div>
     {{end}}
     {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
+    {{if .CanAdd}}
     <section class="card">
       <h2>Tambah atau perbarui akun</h2>
       <form method="post" action="/user/licenses" class="row">
@@ -73,19 +75,26 @@
         <button class="primary" type="submit">Simpan</button>
       </form>
     </section>
+    {{end}}
 
     {{if .Licenses}}
+    <form method="get" action="/user" class="row" style="margin-bottom: 0.8rem;">
+      <label>Tanggal profit
+        <input type="date" name="day" value="{{.ProfitDay}}">
+      </label>
+      <button type="submit">Tampilkan</button>
+      {{if .ProfitDay}}<a class="reset" href="/user">Terbaru</a>{{end}}
+    </form>
     <div class="table-wrap">
     <table>
       <thead>
         <tr>
+          <th>Nama</th>
           <th>Akun</th>
           <th>Produk</th>
-          <th>Sampai</th>
           <th>Status</th>
-          <th>Profit harian</th>
+          <th>Profit</th>
           <th>Dikirim</th>
-          <th>Server terakhir</th>
           <th>Catatan</th>
           <th></th>
         </tr>
@@ -93,21 +102,24 @@
       <tbody>
         {{range .Licenses}}
         <tr>
+          <td>{{.NameText}}</td>
           <td>{{.Account}}</td>
           <td>{{.ProductLabel}}</td>
-          <td>{{.Expires}}</td>
           <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
           <td class="{{.ProfitClass}}">{{.ProfitText}}{{if .ProfitDay}}<span class="sub">{{.ProfitDay}}</span>{{end}}</td>
           <td>{{.ProfitWhen}}</td>
-          <td>{{.ServerName}}</td>
           <td>{{.Note}}</td>
           <td>
+            {{if $.CanAdd}}
             <form method="post" action="/user/licenses/extend" class="inline">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
               <input type="hidden" name="id" value="{{.ID}}">
               <input name="expires" type="date" value="{{.Expires}}" required>
               <button type="submit">Perpanjang</button>
             </form>
+            {{else}}
+            <span>{{.ExpiresText}}</span>
+            {{end}}
             {{if .Active}}
             <form method="post" action="/user/licenses/disable" class="inline">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">

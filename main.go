@@ -86,6 +86,7 @@ func main() {
 	mux.HandleFunc("GET /admin", s.adminPage)
 	mux.HandleFunc("POST /admin/users", s.createUser)
 	mux.HandleFunc("POST /admin/users/password", s.changePassword)
+	mux.HandleFunc("POST /admin/users/can-add", s.setCanAdd)
 	mux.HandleFunc("POST /admin/users/delete", s.removeUser)
 	mux.HandleFunc("POST /admin/impersonate", s.impersonate)
 	mux.HandleFunc("POST /admin/licenses/assign", s.assignLicense)
@@ -366,6 +367,14 @@ func messageOf(code string) string {
 		return "Lisensi dipindahkan ke user."
 	case "bad-user":
 		return "Username 3–32 huruf, angka, atau garis bawah. Kata sandi minimal 6 karakter."
+	case "can-add":
+		return "User ini sekarang boleh menambah akun sendiri."
+	case "can-add-off":
+		return "User ini tidak lagi boleh menambah akun."
+	case "forbidden":
+		return "Penambahan akun hanya bisa dilakukan admin."
+	case "no-extend":
+		return "Tanggal perpanjang hanya bisa diubah admin."
 	default:
 		return ""
 	}
@@ -381,6 +390,11 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
+	profitDay, _ := parseDate(r.URL.Query().Get("day"))
+	if err := applyProfitDay(s.db, profitDay, rows); err != nil {
+		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
+		return
+	}
 	user, err := userByID(s.db, sess.UserID)
 	if err != nil {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
@@ -393,6 +407,8 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		"Message":       messageOf(r.URL.Query().Get("msg")),
 		"Username":      user.Username,
 		"Impersonating": sess.Impersonating,
+		"CanAdd":        sess.Impersonating || user.CanAdd,
+		"ProfitDay":     profitDay,
 	})
 }
 
@@ -406,11 +422,24 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
+	profitDay, _ := parseDate(r.URL.Query().Get("day"))
+	lists := make([][]License, 0, len(users)+1)
+	for i := range users {
+		lists = append(lists, users[i].Licenses)
+	}
+	lists = append(lists, loose)
+	if err := applyProfitDay(s.db, profitDay, lists...); err != nil {
+		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
+		return
+	}
+	openID, _ := strconv.ParseInt(r.URL.Query().Get("open"), 10, 64)
 	s.render(w, "admin.html", map[string]any{
 		"CSRF":       sess.CSRF,
 		"Users":      users,
 		"Unassigned": loose,
 		"Message":    messageOf(r.URL.Query().Get("msg")),
+		"Open":       openID,
+		"ProfitDay":  profitDay,
 	})
 }
 
@@ -464,6 +493,13 @@ func (s *app) addLicense(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sesi tidak valid", http.StatusBadRequest)
 		return
 	}
+	if !sess.Impersonating {
+		user, err := userByID(s.db, sess.UserID)
+		if err != nil || !user.CanAdd {
+			http.Redirect(w, r, "/user?msg=forbidden", http.StatusSeeOther)
+			return
+		}
+	}
 	account, okAcc := parseAccount(r.Form.Get("account"))
 	expires, okDate := parseDate(r.Form.Get("expires"))
 	product := r.Form.Get("product")
@@ -508,6 +544,13 @@ func (s *app) extendLicense(w http.ResponseWriter, r *http.Request) {
 	if !s.checkCSRF(r, sess.CSRF) {
 		http.Error(w, "sesi tidak valid", http.StatusBadRequest)
 		return
+	}
+	if !sess.Impersonating {
+		user, err := userByID(s.db, sess.UserID)
+		if err != nil || !user.CanAdd {
+			http.Redirect(w, r, "/user?msg=no-extend", http.StatusSeeOther)
+			return
+		}
 	}
 	id, okID := formID(r)
 	expires, okDate := parseDate(r.Form.Get("expires"))
@@ -558,7 +601,7 @@ func (s *app) createUser(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin?msg=bad-user", http.StatusSeeOther)
 		return
 	}
-	if err := createUser(s.db, username, password); err != nil {
+	if err := createUser(s.db, username, password, r.Form.Get("can_add") == "1"); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			http.Redirect(w, r, "/admin?msg=user-exists", http.StatusSeeOther)
 			return
@@ -567,6 +610,28 @@ func (s *app) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin?msg=user-created", http.StatusSeeOther)
+}
+
+func (s *app) setCanAdd(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if !s.checkCSRF(r, sess.CSRF) {
+		http.Error(w, "sesi tidak valid", http.StatusBadRequest)
+		return
+	}
+	id, okID := formID(r)
+	allow := r.Form.Get("allow") == "1"
+	if !okID || setUserCanAdd(s.db, id, allow) != nil {
+		http.Error(w, "gagal mengubah izin", http.StatusBadRequest)
+		return
+	}
+	msg := "can-add-off"
+	if allow {
+		msg = "can-add"
+	}
+	http.Redirect(w, r, "/admin?msg="+msg+"&open="+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
 func (s *app) changePassword(w http.ResponseWriter, r *http.Request) {
@@ -660,6 +725,7 @@ func (s *app) assignLicense(w http.ResponseWriter, r *http.Request) {
 type eaRequest struct {
 	Account  json.Number `json:"account"`
 	Server   string      `json:"server"`
+	Name     string      `json:"name"`
 	Product  string      `json:"product"`
 	Pass     string      `json:"pass"`
 	Day      string      `json:"day"`
@@ -701,7 +767,7 @@ func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
 	if len(server) > 120 {
 		server = server[:120]
 	}
-	status, expires, err := licenseStatus(s.db, account, req.Product, server)
+	status, expires, err := licenseStatus(s.db, account, req.Product, server, cleanAccountName(req.Name))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Server lisensi bermasalah"})
 		return
@@ -725,6 +791,20 @@ func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "Akun tidak terdaftar"})
 	}
+}
+
+func cleanAccountName(s string) string {
+	out := make([]rune, 0, 80)
+	for _, r := range strings.TrimSpace(s) {
+		if r < 32 || r == 127 {
+			continue
+		}
+		out = append(out, r)
+		if len(out) == 80 {
+			break
+		}
+	}
+	return string(out)
 }
 
 func parseProfitReport(req eaRequest) (float64, string, string, bool) {

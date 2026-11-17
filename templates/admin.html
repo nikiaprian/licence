@@ -27,6 +27,22 @@
     .meta { margin: 0.15rem 0 0; color: #5c564c; font-size: 0.8rem; }
     .empty { color: #5c564c; margin: 0; }
     form.inline { display: flex; gap: 0.35rem; align-items: center; }
+    details.user { background: #fff; border: 1px solid #e4dccb; margin-bottom: 0.6rem; }
+    details.user > summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; gap: 0.8rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 1rem; }
+    details.user > summary::-webkit-details-marker { display: none; }
+    details.user .body { padding: 0 1rem 1rem; }
+    .name { display: flex; align-items: center; gap: 0.45rem; }
+    .chev { color: #5c564c; transition: transform 0.15s; }
+    details.user[open] .chev { transform: rotate(90deg); }
+    label.switch { flex-direction: row; align-items: center; }
+    .switch { display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer; font-size: 0.8rem; }
+    .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+    .track { width: 2.4rem; height: 1.35rem; background: #d9d1c3; border-radius: 999px; position: relative; flex: none; }
+    .track::after { content: ""; position: absolute; top: 0.15rem; left: 0.15rem; width: 1.05rem; height: 1.05rem; background: #fff; border-radius: 50%; transition: transform 0.15s; }
+    .switch input:checked + .track { background: #1d6b3a; }
+    .switch input:checked + .track::after { transform: translateX(1.05rem); }
+    .switch input:focus-visible + .track { outline: 2px solid #1c1915; outline-offset: 2px; }
+    a.reset { align-self: center; color: #1c1915; font-size: 0.85rem; }
   </style>
 </head>
 <body>
@@ -36,6 +52,14 @@
   </header>
   <main>
     {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
+    <form method="get" action="/admin" class="row" style="margin-bottom: 1rem;">
+      {{if .Open}}<input type="hidden" name="open" value="{{.Open}}">{{end}}
+      <label>Tanggal profit
+        <input type="date" name="day" value="{{.ProfitDay}}">
+      </label>
+      <button type="submit">Tampilkan</button>
+      {{if .ProfitDay}}<a class="reset" href="/admin">Terbaru</a>{{end}}
+    </form>
     <section class="card">
       <h2>Tambah user</h2>
       <form method="post" action="/admin/users" class="row" style="margin-top: 0.8rem;">
@@ -45,6 +69,11 @@
         </label>
         <label>Kata sandi
           <input name="password" type="password" minlength="6" maxlength="72" required>
+        </label>
+        <label class="switch" style="padding-bottom: 0.15rem;">
+          <input type="checkbox" name="can_add" value="1">
+          <span class="track"></span>
+          Boleh menambah akun sendiri
         </label>
         <button class="primary" type="submit">Buat</button>
       </form>
@@ -56,14 +85,14 @@
       <p class="meta">Akun ini ada sebelum halaman user. Pindahkan ke user agar muncul di halaman mereka.</p>
       <table>
         <thead>
-          <tr><th>Akun</th><th>Produk</th><th>Sampai</th><th>Status</th><th>Profit</th><th></th></tr>
+          <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th></th></tr>
         </thead>
         <tbody>
           {{range .Unassigned}}
           <tr>
+            <td>{{.NameText}}</td>
             <td>{{.Account}}</td>
             <td>{{.ProductLabel}}</td>
-            <td>{{.Expires}}</td>
             <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
             <td class="{{.ProfitClass}}">{{.ProfitText}}</td>
             <td>
@@ -74,9 +103,11 @@
                 <select name="user_id" required>
                   {{range $.Users}}<option value="{{.ID}}">{{.Username}}</option>{{end}}
                 </select>
+                <span>{{.ExpiresText}}</span>
                 <button type="submit">Pindahkan</button>
               </form>
               {{else}}
+              <span>{{.ExpiresText}}</span>
               <span class="meta">Buat user dulu.</span>
               {{end}}
             </td>
@@ -89,25 +120,39 @@
 
     {{if .Users}}
       {{range .Users}}
-      <section class="card">
-        <div class="head">
-          <div>
-            <h2>{{.Username}}</h2>
-            <p class="meta">Dibuat {{.CreatedLabel}}</p>
-          </div>
-          <div class="actions">
+      <details class="user" {{if eq $.Open .ID}}open{{end}}>
+        <summary>
+          <span class="name">
+            <span class="chev">▸</span>
+            <span>
+              <h2>{{.Username}}</h2>
+              <p class="meta">{{len .Licenses}} akun · dibuat {{.CreatedLabel}}</p>
+            </span>
+          </span>
+          <span class="actions" onclick="event.stopPropagation()">
+            <form method="post" action="/admin/users/can-add">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <input type="hidden" name="allow" value="{{if .CanAdd}}0{{else}}1{{end}}">
+              <label class="switch">
+                <input type="checkbox" {{if .CanAdd}}checked{{end}} onchange="this.form.submit()" aria-label="Izin tambah akun untuk {{.Username}}">
+                <span class="track"></span>
+                Tambah akun
+              </label>
+            </form>
             <form method="post" action="/admin/impersonate">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
               <input type="hidden" name="id" value="{{.ID}}">
-              <button class="primary" type="submit">Masuk sebagai user</button>
+              <button class="primary" type="submit">Masuk</button>
             </form>
             <form method="post" action="/admin/users/delete" onsubmit="return confirm('Hapus user ini beserta semua lisensinya? EA pada akun tersebut akan berhenti.');">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
               <input type="hidden" name="id" value="{{.ID}}">
               <button type="submit">Hapus</button>
             </form>
-          </div>
-        </div>
+          </span>
+        </summary>
+        <div class="body">
         <form method="post" action="/admin/users/password" class="row">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <input type="hidden" name="id" value="{{.ID}}">
@@ -119,19 +164,19 @@
         {{if .Licenses}}
         <table style="margin-top: 0.9rem;">
           <thead>
-            <tr><th>Akun</th><th>Produk</th><th>Sampai</th><th>Status</th><th>Profit harian</th><th>Dikirim</th><th>Server</th><th>Catatan</th></tr>
+            <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Dikirim</th><th>Catatan</th><th></th></tr>
           </thead>
           <tbody>
             {{range .Licenses}}
             <tr>
+              <td>{{.NameText}}</td>
               <td>{{.Account}}</td>
               <td>{{.ProductLabel}}</td>
-              <td>{{.Expires}}</td>
               <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
               <td class="{{.ProfitClass}}">{{.ProfitText}}{{if .ProfitDay}}<span class="meta"> {{.ProfitDay}}</span>{{end}}</td>
               <td>{{.ProfitWhen}}</td>
-              <td>{{.ServerName}}</td>
               <td>{{.Note}}</td>
+              <td>{{.ExpiresText}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -139,7 +184,8 @@
         {{else}}
         <p class="empty" style="margin-top: 0.8rem;">Belum ada lisensi.</p>
         {{end}}
-      </section>
+        </div>
+      </details>
       {{end}}
     {{else}}
     <p class="empty">Belum ada user.</p>

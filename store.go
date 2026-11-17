@@ -23,12 +23,28 @@ type License struct {
 	Note           string
 	Active         bool
 	ServerName     string
+	AccountName    string
 	CreatedAt      string
 	Profit         float64
 	ProfitDay      string
 	ProfitCurrency string
 	ProfitAt       string
 	UserID         int64
+}
+
+func (l License) NameText() string {
+	if l.AccountName == "" {
+		return "—"
+	}
+	return l.AccountName
+}
+
+func (l License) ExpiresText() string {
+	t, err := time.Parse("2006-01-02", l.Expires)
+	if err != nil {
+		return l.Expires
+	}
+	return t.Format("02/01/2006")
 }
 
 func (l License) ProductLabel() string {
@@ -78,14 +94,16 @@ CREATE TABLE IF NOT EXISTS users (
 		db.Close()
 		return nil, err
 	}
-	for _, col := range []struct{ name, decl string }{
-		{"profit", "REAL NOT NULL DEFAULT 0"},
-		{"profit_day", "TEXT NOT NULL DEFAULT ''"},
-		{"profit_currency", "TEXT NOT NULL DEFAULT ''"},
-		{"profit_at", "TEXT NOT NULL DEFAULT ''"},
-		{"user_id", "INTEGER NOT NULL DEFAULT 0"},
+	for _, col := range []struct{ table, name, decl string }{
+		{"licenses", "profit", "REAL NOT NULL DEFAULT 0"},
+		{"licenses", "profit_day", "TEXT NOT NULL DEFAULT ''"},
+		{"licenses", "profit_currency", "TEXT NOT NULL DEFAULT ''"},
+		{"licenses", "profit_at", "TEXT NOT NULL DEFAULT ''"},
+		{"licenses", "user_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"licenses", "account_name", "TEXT NOT NULL DEFAULT ''"},
+		{"users", "can_add", "INTEGER NOT NULL DEFAULT 0"},
 	} {
-		if err := addColumn(db, col.name, col.decl); err != nil {
+		if err := addColumn(db, col.table, col.name, col.decl); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -94,11 +112,32 @@ CREATE TABLE IF NOT EXISTS users (
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS profit_reports (
+  license_id INTEGER NOT NULL,
+  day TEXT NOT NULL,
+  profit REAL NOT NULL,
+  currency TEXT NOT NULL DEFAULT '',
+  reported_at TEXT NOT NULL,
+  PRIMARY KEY (license_id, day)
+)`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`INSERT INTO profit_reports(license_id, day, profit, currency, reported_at)
+		SELECT id, profit_day, profit, profit_currency, profit_at FROM licenses
+		WHERE profit_day <> '' AND profit_at <> ''
+		ON CONFLICT(license_id, day) DO NOTHING`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
-func addColumn(db *sql.DB, name, decl string) error {
-	rows, err := db.Query(`PRAGMA table_info(licenses)`)
+func addColumn(db *sql.DB, table, name, decl string) error {
+	if table != "licenses" && table != "users" {
+		return fmt.Errorf("tabel tidak dikenal")
+	}
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return err
 	}
@@ -117,7 +156,7 @@ func addColumn(db *sql.DB, name, decl string) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	_, err = db.Exec(`ALTER TABLE licenses ADD COLUMN ` + name + ` ` + decl)
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + decl)
 	return err
 }
 
@@ -149,6 +188,7 @@ type AccountUser struct {
 	ID        int64
 	Username  string
 	CreatedAt string
+	CanAdd    bool
 	Licenses  []License
 }
 
@@ -161,14 +201,18 @@ func (u AccountUser) CreatedLabel() string {
 	return t.In(wib).Format("02/01/2006 15:04")
 }
 
-func createUser(db *sql.DB, username, password string) error {
+func createUser(db *sql.DB, username, password string, canAdd bool) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = db.Exec(`INSERT INTO users(username, password_hash, created_at) VALUES(?, ?, ?)`,
-		username, string(hash), now)
+	add := 0
+	if canAdd {
+		add = 1
+	}
+	_, err = db.Exec(`INSERT INTO users(username, password_hash, created_at, can_add) VALUES(?, ?, ?, ?)`,
+		username, string(hash), now, add)
 	return err
 }
 
@@ -187,9 +231,30 @@ func checkUserPassword(db *sql.DB, username, password string) (int64, bool) {
 
 func userByID(db *sql.DB, id int64) (AccountUser, error) {
 	var u AccountUser
-	err := db.QueryRow(`SELECT id, username, created_at FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.CreatedAt)
+	var canAdd int
+	err := db.QueryRow(`SELECT id, username, created_at, can_add FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.Username, &u.CreatedAt, &canAdd)
+	u.CanAdd = canAdd == 1
 	return u, err
+}
+
+func setUserCanAdd(db *sql.DB, id int64, allow bool) error {
+	v := 0
+	if allow {
+		v = 1
+	}
+	res, err := db.Exec(`UPDATE users SET can_add=? WHERE id=?`, v, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("user tidak ditemukan")
+	}
+	return nil
 }
 
 func setUserPassword(db *sql.DB, id int64, password string) error {
@@ -235,7 +300,7 @@ func deleteUser(db *sql.DB, id int64) error {
 }
 
 func listUsersAndLicenses(db *sql.DB) ([]AccountUser, []License, error) {
-	rows, err := db.Query(`SELECT id, username, created_at FROM users ORDER BY username`)
+	rows, err := db.Query(`SELECT id, username, created_at, can_add FROM users ORDER BY username`)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -244,9 +309,11 @@ func listUsersAndLicenses(db *sql.DB) ([]AccountUser, []License, error) {
 	byID := map[int64]int{}
 	for rows.Next() {
 		var u AccountUser
-		if err := rows.Scan(&u.ID, &u.Username, &u.CreatedAt); err != nil {
+		var canAdd int
+		if err := rows.Scan(&u.ID, &u.Username, &u.CreatedAt, &canAdd); err != nil {
 			return nil, nil, err
 		}
+		u.CanAdd = canAdd == 1
 		byID[u.ID] = len(users)
 		users = append(users, u)
 	}
@@ -291,7 +358,7 @@ func saveLicense(db *sql.DB, userID, account int64, product, expires, note strin
 }
 
 func listLicenses(db *sql.DB, userID int64) ([]License, error) {
-	query := `SELECT id, account, product, expires, note, active, server_name, created_at,
+	query := `SELECT id, account, product, expires, note, active, server_name, account_name, created_at,
 		profit, profit_day, profit_currency, profit_at, user_id
 		FROM licenses`
 	var rows *sql.Rows
@@ -309,7 +376,7 @@ func listLicenses(db *sql.DB, userID int64) ([]License, error) {
 	for rows.Next() {
 		var l License
 		var active int
-		if err := rows.Scan(&l.ID, &l.Account, &l.Product, &l.Expires, &l.Note, &active, &l.ServerName, &l.CreatedAt,
+		if err := rows.Scan(&l.ID, &l.Account, &l.Product, &l.Expires, &l.Note, &active, &l.ServerName, &l.AccountName, &l.CreatedAt,
 			&l.Profit, &l.ProfitDay, &l.ProfitCurrency, &l.ProfitAt, &l.UserID); err != nil {
 			return nil, err
 		}
@@ -336,18 +403,76 @@ func assignLicense(db *sql.DB, licenseID, userID int64) error {
 
 func saveProfit(db *sql.DB, account int64, product, day string, profit float64, currency string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := db.Exec(`UPDATE licenses
-		SET profit=?, profit_day=?, profit_currency=?, profit_at=?
-		WHERE account=? AND product=?`, profit, day, currency, now, account, product)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
+	var id int64
+	err := db.QueryRow(`SELECT id FROM licenses WHERE account=? AND product=?`, account, product).Scan(&id)
+	if err == sql.ErrNoRows {
 		return fmt.Errorf("lisensi tidak ditemukan")
+	}
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE licenses
+		SET profit=?, profit_day=?, profit_currency=?, profit_at=?
+		WHERE id=?`, profit, day, currency, now, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO profit_reports(license_id, day, profit, currency, reported_at)
+		VALUES(?, ?, ?, ?, ?)
+		ON CONFLICT(license_id, day) DO UPDATE SET
+		  profit=excluded.profit,
+		  currency=excluded.currency,
+		  reported_at=excluded.reported_at`, id, day, profit, currency, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func applyProfitDay(db *sql.DB, day string, lists ...[]License) error {
+	if day == "" {
+		return nil
+	}
+	rows, err := db.Query(`SELECT license_id, profit, currency, reported_at FROM profit_reports WHERE day=?`, day)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type report struct {
+		profit   float64
+		currency string
+		at       string
+	}
+	found := map[int64]report{}
+	for rows.Next() {
+		var id int64
+		var r report
+		if err := rows.Scan(&id, &r.profit, &r.currency, &r.at); err != nil {
+			return err
+		}
+		found[id] = r
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, list := range lists {
+		for i := range list {
+			r, ok := found[list[i].ID]
+			if !ok {
+				list[i].Profit = 0
+				list[i].ProfitDay = ""
+				list[i].ProfitCurrency = ""
+				list[i].ProfitAt = ""
+				continue
+			}
+			list[i].Profit = r.profit
+			list[i].ProfitDay = day
+			list[i].ProfitCurrency = r.currency
+			list[i].ProfitAt = r.at
+		}
 	}
 	return nil
 }
@@ -433,7 +558,7 @@ func setActive(db *sql.DB, id, userID int64, active bool) error {
 }
 
 // licenseStatus: ok, missing, expired.
-func licenseStatus(db *sql.DB, account int64, product, server string) (string, string, error) {
+func licenseStatus(db *sql.DB, account int64, product, server, accountName string) (string, string, error) {
 	var id int64
 	var expires string
 	var active int
@@ -449,6 +574,10 @@ func licenseStatus(db *sql.DB, account int64, product, server string) (string, s
 	if expires < today {
 		return "expired", expires, nil
 	}
-	_, _ = db.Exec(`UPDATE licenses SET server_name=? WHERE id=?`, server, id)
+	if accountName != "" {
+		_, _ = db.Exec(`UPDATE licenses SET server_name=?, account_name=? WHERE id=?`, server, accountName, id)
+	} else {
+		_, _ = db.Exec(`UPDATE licenses SET server_name=? WHERE id=?`, server, id)
+	}
 	return "ok", expires, nil
 }
