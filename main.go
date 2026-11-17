@@ -390,8 +390,8 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
-	profitDay, _ := parseDate(r.URL.Query().Get("day"))
-	if err := applyProfitDay(s.db, profitDay, rows); err != nil {
+	from, to := profitFilter(r.URL.Query())
+	if err := applyProfitSpan(s.db, from, to, rows); err != nil {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
@@ -408,7 +408,8 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		"Username":      user.Username,
 		"Impersonating": sess.Impersonating,
 		"CanAdd":        sess.Impersonating || user.CanAdd,
-		"ProfitDay":     profitDay,
+		"From":          from,
+		"To":            to,
 	})
 }
 
@@ -422,13 +423,13 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
-	profitDay, _ := parseDate(r.URL.Query().Get("day"))
+	from, to := profitFilter(r.URL.Query())
 	lists := make([][]License, 0, len(users)+1)
 	for i := range users {
 		lists = append(lists, users[i].Licenses)
 	}
 	lists = append(lists, loose)
-	if err := applyProfitDay(s.db, profitDay, lists...); err != nil {
+	if err := applyProfitSpan(s.db, from, to, lists...); err != nil {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
@@ -439,8 +440,37 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		"Unassigned": loose,
 		"Message":    messageOf(r.URL.Query().Get("msg")),
 		"Open":       openID,
-		"ProfitDay":  profitDay,
+		"From":       from,
+		"To":         to,
 	})
+}
+
+func profitFilter(q map[string][]string) (string, string) {
+	from, fromOK := parseDate(firstQuery(q, "from"))
+	to, toOK := parseDate(firstQuery(q, "to"))
+	if !fromOK {
+		from = ""
+	}
+	if !toOK {
+		to = ""
+	}
+	if from != "" && to == "" {
+		to = from
+	}
+	if to != "" && from == "" {
+		from = to
+	}
+	if from != "" && to != "" && from > to {
+		from, to = to, from
+	}
+	return from, to
+}
+
+func firstQuery(q map[string][]string, key string) string {
+	if len(q[key]) == 0 {
+		return ""
+	}
+	return q[key][0]
 }
 
 func parseAccount(v string) (int64, bool) {
@@ -731,6 +761,12 @@ type eaRequest struct {
 	Day      string      `json:"day"`
 	Profit   json.Number `json:"profit"`
 	Currency string      `json:"currency"`
+	Days     []eaDay     `json:"days"`
+}
+
+type eaDay struct {
+	Day    string      `json:"day"`
+	Profit json.Number `json:"profit"`
 }
 
 func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
@@ -738,7 +774,7 @@ func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "Terlalu banyak permintaan"})
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	body, err := io.ReadAll(io.LimitReader(r.Body, 262144))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Kesalahan Credentials"})
 		return
@@ -774,7 +810,17 @@ func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
 	}
 	switch status {
 	case "ok":
-		if req.Profit != "" || req.Day != "" {
+		if len(req.Days) > 0 {
+			days, valid := parseProfitDays(req)
+			if !valid {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "Data profit tidak valid"})
+				return
+			}
+			if err := saveProfitDays(s.db, account, req.Product, cleanCurrency(req.Currency), days); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Server lisensi bermasalah"})
+				return
+			}
+		} else if req.Profit != "" || req.Day != "" {
 			profit, day, currency, valid := parseProfitReport(req)
 			if !valid {
 				writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "Data profit tidak valid"})
@@ -808,23 +854,52 @@ func cleanAccountName(s string) string {
 }
 
 func parseProfitReport(req eaRequest) (float64, string, string, bool) {
-	if req.Profit == "" || req.Day == "" {
-		return 0, "", "", false
-	}
-	profit, err := req.Profit.Float64()
-	if err != nil || math.IsNaN(profit) || math.IsInf(profit, 0) {
-		return 0, "", "", false
-	}
-	day, ok := parseDate(req.Day)
+	profit, day, ok := parseOneProfit(req.Day, req.Profit)
 	if !ok {
 		return 0, "", "", false
 	}
+	return profit, day, cleanCurrency(req.Currency), true
+}
+
+func parseProfitDays(req eaRequest) ([]dayProfit, bool) {
+	if len(req.Days) == 0 || len(req.Days) > 1200 {
+		return nil, false
+	}
+	out := make([]dayProfit, 0, len(req.Days))
+	seen := map[string]int{}
+	for _, item := range req.Days {
+		profit, day, ok := parseOneProfit(item.Day, item.Profit)
+		if !ok {
+			return nil, false
+		}
+		if i, exists := seen[day]; exists {
+			out[i].profit = profit
+			continue
+		}
+		seen[day] = len(out)
+		out = append(out, dayProfit{day: day, profit: profit})
+	}
+	return out, true
+}
+
+func parseOneProfit(dayText string, profitText json.Number) (float64, string, bool) {
+	if profitText == "" || dayText == "" {
+		return 0, "", false
+	}
+	profit, err := profitText.Float64()
+	if err != nil || math.IsNaN(profit) || math.IsInf(profit, 0) {
+		return 0, "", false
+	}
+	day, ok := parseDate(dayText)
+	if !ok {
+		return 0, "", false
+	}
 	t, _ := time.Parse("2006-01-02", day)
 	now := time.Now().UTC()
-	if t.Before(now.AddDate(-1, 0, 0)) || t.After(now.AddDate(0, 0, 2)) {
-		return 0, "", "", false
+	if t.Before(now.AddDate(-10, 0, 0)) || t.After(now.AddDate(0, 0, 2)) {
+		return 0, "", false
 	}
-	return profit, day, cleanCurrency(req.Currency), true
+	return profit, day, true
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

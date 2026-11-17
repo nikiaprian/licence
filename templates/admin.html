@@ -54,11 +54,14 @@
     {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
     <form method="get" action="/admin" class="row" style="margin-bottom: 1rem;">
       {{if .Open}}<input type="hidden" name="open" value="{{.Open}}">{{end}}
-      <label>Tanggal profit
-        <input type="date" name="day" value="{{.ProfitDay}}">
+      <label>Dari
+        <input type="date" name="from" value="{{.From}}">
+      </label>
+      <label>Sampai
+        <input type="date" name="to" value="{{.To}}">
       </label>
       <button type="submit">Tampilkan</button>
-      {{if .ProfitDay}}<a class="reset" href="/admin">Terbaru</a>{{end}}
+      {{if or .From .To}}{{if .Open}}<a class="reset" href="/admin?open={{.Open}}">Semua riwayat</a>{{else}}<a class="reset" href="/admin">Semua riwayat</a>{{end}}{{end}}
     </form>
     <section class="card">
       <h2>Tambah user</h2>
@@ -94,7 +97,7 @@
             <td>{{.Account}}</td>
             <td>{{.ProductLabel}}</td>
             <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
-            <td class="{{.ProfitClass}}">{{.ProfitText}}</td>
+            <td class="{{.ProfitClass}}">{{.ProfitText}}{{if .ProfitDay}}<span class="meta"> {{.ProfitDay}}</span>{{end}}</td>
             <td>
               {{if $.Users}}
               <form method="post" action="/admin/licenses/assign" class="inline">
@@ -164,7 +167,7 @@
         {{if .Licenses}}
         <table style="margin-top: 0.9rem;">
           <thead>
-            <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Dikirim</th><th>Catatan</th><th></th></tr>
+            <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Catatan</th><th></th></tr>
           </thead>
           <tbody>
             {{range .Licenses}}
@@ -174,7 +177,6 @@
               <td>{{.ProductLabel}}</td>
               <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
               <td class="{{.ProfitClass}}">{{.ProfitText}}{{if .ProfitDay}}<span class="meta"> {{.ProfitDay}}</span>{{end}}</td>
-              <td>{{.ProfitWhen}}</td>
               <td>{{.Note}}</td>
               <td>{{.ExpiresText}}</td>
             </tr>

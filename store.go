@@ -401,7 +401,19 @@ func assignLicense(db *sql.DB, licenseID, userID int64) error {
 	return nil
 }
 
+type dayProfit struct {
+	day    string
+	profit float64
+}
+
 func saveProfit(db *sql.DB, account int64, product, day string, profit float64, currency string) error {
+	return saveProfitDays(db, account, product, currency, []dayProfit{{day: day, profit: profit}})
+}
+
+func saveProfitDays(db *sql.DB, account int64, product, currency string, days []dayProfit) error {
+	if len(days) == 0 {
+		return nil
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	var id int64
 	err := db.QueryRow(`SELECT id FROM licenses WHERE account=? AND product=?`, account, product).Scan(&id)
@@ -411,6 +423,12 @@ func saveProfit(db *sql.DB, account int64, product, day string, profit float64, 
 	if err != nil {
 		return err
 	}
+	latest := days[0]
+	for _, d := range days[1:] {
+		if d.day > latest.day {
+			latest = d
+		}
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -418,39 +436,46 @@ func saveProfit(db *sql.DB, account int64, product, day string, profit float64, 
 	defer tx.Rollback()
 	if _, err := tx.Exec(`UPDATE licenses
 		SET profit=?, profit_day=?, profit_currency=?, profit_at=?
-		WHERE id=?`, profit, day, currency, now, id); err != nil {
+		WHERE id=?`, latest.profit, latest.day, currency, now, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO profit_reports(license_id, day, profit, currency, reported_at)
-		VALUES(?, ?, ?, ?, ?)
-		ON CONFLICT(license_id, day) DO UPDATE SET
-		  profit=excluded.profit,
-		  currency=excluded.currency,
-		  reported_at=excluded.reported_at`, id, day, profit, currency, now); err != nil {
-		return err
+	for _, d := range days {
+		if _, err := tx.Exec(`INSERT INTO profit_reports(license_id, day, profit, currency, reported_at)
+			VALUES(?, ?, ?, ?, ?)
+			ON CONFLICT(license_id, day) DO UPDATE SET
+			  profit=excluded.profit,
+			  currency=excluded.currency,
+			  reported_at=excluded.reported_at`, id, d.day, d.profit, currency, now); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
 
-func applyProfitDay(db *sql.DB, day string, lists ...[]License) error {
-	if day == "" {
-		return nil
+func applyProfitSpan(db *sql.DB, from, to string, lists ...[]License) error {
+	if from == "" {
+		from = "0000-01-01"
 	}
-	rows, err := db.Query(`SELECT license_id, profit, currency, reported_at FROM profit_reports WHERE day=?`, day)
+	if to == "" {
+		to = "9999-12-31"
+	}
+	rows, err := db.Query(`SELECT license_id, SUM(profit), MIN(day), MAX(day), MAX(currency)
+		FROM profit_reports WHERE day>=? AND day<=? GROUP BY license_id`, from, to)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	type report struct {
 		profit   float64
+		minDay   string
+		maxDay   string
 		currency string
-		at       string
 	}
 	found := map[int64]report{}
 	for rows.Next() {
 		var id int64
 		var r report
-		if err := rows.Scan(&id, &r.profit, &r.currency, &r.at); err != nil {
+		if err := rows.Scan(&id, &r.profit, &r.minDay, &r.maxDay, &r.currency); err != nil {
 			return err
 		}
 		found[id] = r
@@ -469,12 +494,29 @@ func applyProfitDay(db *sql.DB, day string, lists ...[]License) error {
 				continue
 			}
 			list[i].Profit = r.profit
-			list[i].ProfitDay = day
+			list[i].ProfitDay = daySpanText(r.minDay, r.maxDay)
 			list[i].ProfitCurrency = r.currency
-			list[i].ProfitAt = r.at
+			list[i].ProfitAt = r.maxDay
 		}
 	}
 	return nil
+}
+
+func daySpanText(minDay, maxDay string) string {
+	a := formatISODate(minDay)
+	b := formatISODate(maxDay)
+	if a == b {
+		return a
+	}
+	return a + " – " + b
+}
+
+func formatISODate(iso string) string {
+	t, err := time.Parse("2006-01-02", iso)
+	if err != nil {
+		return iso
+	}
+	return t.Format("02/01/2006")
 }
 
 func (l License) ProfitText() string {
@@ -496,18 +538,6 @@ func (l License) ProfitClass() string {
 		return "off"
 	}
 	return "on"
-}
-
-func (l License) ProfitWhen() string {
-	if l.ProfitAt == "" {
-		return "—"
-	}
-	t, err := time.Parse(time.RFC3339, l.ProfitAt)
-	if err != nil {
-		return l.ProfitAt
-	}
-	wib := time.FixedZone("WIB", 7*3600)
-	return t.In(wib).Format("02/01 15:04") + " WIB"
 }
 
 func cleanCurrency(s string) string {
