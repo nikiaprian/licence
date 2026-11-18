@@ -17,6 +17,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -391,7 +392,7 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
-	from, to := profitFilter(r.URL.Query())
+	from, to, _ := profitFilter(r.URL.Query())
 	if err := applyProfitSpan(s.db, from, to, rows); err != nil {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
@@ -426,7 +427,7 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
-	from, to := profitFilter(r.URL.Query())
+	from, to, all := profitFilter(r.URL.Query())
 	lists := make([][]License, 0, len(users)+1)
 	for i := range users {
 		lists = append(lists, users[i].Licenses)
@@ -437,6 +438,11 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	openID, _ := strconv.ParseInt(r.URL.Query().Get("open"), 10, 64)
+	tab := r.URL.Query().Get("tab")
+	if tab != "akun" {
+		tab = "user"
+	}
+	accounts, flat := collectAccounts(users, loose)
 	s.render(w, "admin.html", map[string]any{
 		"CSRF":       sess.CSRF,
 		"Users":      users,
@@ -445,7 +451,63 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		"Open":       openID,
 		"From":       from,
 		"To":         to,
+		"Tab":        tab,
+		"Accounts":   accounts,
+		"TotalText":  profitTotalText(flat),
+		"TotalClass": profitTotalClass(flat),
+		"UserHref":   adminPath("user", from, to, openID, all),
+		"AkunHref":   adminPath("akun", from, to, 0, all),
+		"ResetHref":  adminPath(tab, "", "", openID, true),
 	})
+}
+
+type accountLine struct {
+	License
+	Owner string
+}
+
+func collectAccounts(users []AccountUser, loose []License) ([]accountLine, []License) {
+	n := len(loose)
+	for _, u := range users {
+		n += len(u.Licenses)
+	}
+	lines := make([]accountLine, 0, n)
+	flat := make([]License, 0, n)
+	for _, u := range users {
+		for _, l := range u.Licenses {
+			lines = append(lines, accountLine{License: l, Owner: u.Username})
+			flat = append(flat, l)
+		}
+	}
+	for _, l := range loose {
+		lines = append(lines, accountLine{License: l})
+		flat = append(flat, l)
+	}
+	return lines, flat
+}
+
+func adminPath(tab, from, to string, open int64, all bool) string {
+	q := url.Values{}
+	if tab == "akun" {
+		q.Set("tab", "akun")
+	}
+	if all {
+		q.Set("all", "1")
+	} else {
+		if from != "" {
+			q.Set("from", from)
+		}
+		if to != "" {
+			q.Set("to", to)
+		}
+	}
+	if tab != "akun" && open > 0 {
+		q.Set("open", strconv.FormatInt(open, 10))
+	}
+	if encoded := q.Encode(); encoded != "" {
+		return "/admin?" + encoded
+	}
+	return "/admin"
 }
 
 func profitTotalText(rows []License) string {
@@ -493,7 +555,10 @@ func profitTotalClass(rows []License) string {
 	return "on"
 }
 
-func profitFilter(q map[string][]string) (string, string) {
+func profitFilter(q map[string][]string) (string, string, bool) {
+	if firstQuery(q, "all") == "1" {
+		return "", "", true
+	}
 	from, fromOK := parseDate(firstQuery(q, "from"))
 	to, toOK := parseDate(firstQuery(q, "to"))
 	if !fromOK {
@@ -511,7 +576,11 @@ func profitFilter(q map[string][]string) (string, string) {
 	if from != "" && to != "" && from > to {
 		from, to = to, from
 	}
-	return from, to
+	if from == "" && to == "" {
+		day := time.Now().In(time.FixedZone("WIB", 7*3600)).Format("2006-01-02")
+		return day, day, false
+	}
+	return from, to, false
 }
 
 func firstQuery(q map[string][]string, key string) string {

@@ -52,7 +52,7 @@ func (l License) ProductLabel() string {
 	case "btcusd":
 		return "BTCUSD"
 	case "xau":
-		return "XAU"
+		return "XAUUSD"
 	default:
 		return l.Product
 	}

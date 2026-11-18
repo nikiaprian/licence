@@ -43,6 +43,21 @@
     .switch input:checked + .track::after { transform: translateX(1.05rem); }
     .switch input:focus-visible + .track { outline: 2px solid #1c1915; outline-offset: 2px; }
     a.reset { align-self: center; color: #1c1915; font-size: 0.85rem; }
+    .tabs { display: flex; gap: 0.35rem; margin: 0 0 0.85rem; }
+    .tabs a { text-decoration: none; color: #1c1915; background: #fff; border: 1px solid #e4dccb; padding: 0.4rem 0.85rem; }
+    .tabs a.active { background: #1c1915; color: #fff; border-color: #1c1915; }
+    .toolbar { display: flex; justify-content: space-between; align-items: end; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .toolbar form { margin: 0; }
+    dialog { border: 1px solid #e4dccb; padding: 1rem 1.1rem; background: #fff; color: inherit; width: min(26rem, calc(100% - 2rem)); }
+    dialog::backdrop { background: rgba(28, 25, 21, 0.35); }
+    .dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 0.9rem; }
+    .stack { display: flex; flex-direction: column; gap: 0.7rem; }
+    .stack .end { display: flex; justify-content: flex-end; gap: 0.5rem; }
+    button.plain { background: transparent; border: 1px solid #cfc6b6; padding: 0.35rem 0.7rem; }
+    .total { margin-left: auto; text-align: right; }
+    .total span { display: block; font-size: 0.75rem; color: #5c564c; }
+    .total strong { font-size: 1.35rem; font-weight: 650; }
+    .table-wrap { overflow-x: auto; }
   </style>
 </head>
 <body>
@@ -52,8 +67,14 @@
   </header>
   <main>
     {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
-    <form method="get" action="/admin" class="row" style="margin-bottom: 1rem;">
-      {{if .Open}}<input type="hidden" name="open" value="{{.Open}}">{{end}}
+    <nav class="tabs">
+      <a class="{{if ne .Tab "akun"}}active{{end}}" href="{{.UserHref}}">User</a>
+      <a class="{{if eq .Tab "akun"}}active{{end}}" href="{{.AkunHref}}">Semua akun</a>
+    </nav>
+    <div class="toolbar">
+    <form method="get" action="/admin" class="row">
+      {{if eq .Tab "akun"}}<input type="hidden" name="tab" value="akun">{{end}}
+      {{if and .Open (ne .Tab "akun")}}<input type="hidden" name="open" value="{{.Open}}">{{end}}
       <label>Dari
         <input type="date" name="from" value="{{.From}}">
       </label>
@@ -61,11 +82,57 @@
         <input type="date" name="to" value="{{.To}}">
       </label>
       <button type="submit">Tampilkan</button>
-      {{if or .From .To}}{{if .Open}}<a class="reset" href="/admin?open={{.Open}}">Semua riwayat</a>{{else}}<a class="reset" href="/admin">Semua riwayat</a>{{end}}{{end}}
+      {{if or .From .To}}<a class="reset" href="{{.ResetHref}}">Semua riwayat</a>{{end}}
     </form>
+    {{if ne .Tab "akun"}}
+    <button type="button" class="primary" onclick="document.getElementById('add-user').showModal()">Tambah user</button>
+    {{end}}
+    </div>
+    {{if eq .Tab "akun"}}
     <section class="card">
-      <h2>Tambah user</h2>
-      <form method="post" action="/admin/users" class="row" style="margin-top: 0.8rem;">
+      <div class="head">
+        <div>
+          <h2>Semua akun trading</h2>
+          <p class="meta">{{len .Accounts}} akun dari seluruh user</p>
+        </div>
+        <div class="total">
+          <span>Total profit</span>
+          <strong class="{{.TotalClass}}">{{.TotalText}}</strong>
+        </div>
+      </div>
+      {{if .Accounts}}
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>User</th><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Catatan</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .Accounts}}
+          <tr>
+            <td>{{if .Owner}}{{.Owner}}{{else}}<span class="meta">Belum punya user</span>{{end}}</td>
+            <td>{{.NameText}}</td>
+            <td>{{.Account}}</td>
+            <td>{{.ProductLabel}}</td>
+            <td class="{{if .Active}}on{{else}}off{{end}}">{{if .Active}}Aktif{{else}}Mati{{end}}</td>
+            <td class="{{.ProfitClass}}">{{.ProfitText}}</td>
+            <td>{{.Note}}</td>
+            <td>{{.ExpiresText}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      </div>
+      {{else}}
+      <p class="empty">Belum ada akun trading.</p>
+      {{end}}
+    </section>
+    {{else}}
+    <dialog id="add-user">
+      <form method="post" action="/admin/users" class="stack">
+        <div class="dlg-head">
+          <h2>Tambah user</h2>
+          <button type="button" class="plain" onclick="this.closest('dialog').close()">Tutup</button>
+        </div>
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <label>Username
           <input name="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]+" required>
@@ -73,14 +140,21 @@
         <label>Kata sandi
           <input name="password" type="password" minlength="6" maxlength="72" required>
         </label>
-        <label class="switch" style="padding-bottom: 0.15rem;">
+        <label class="switch">
           <input type="checkbox" name="can_add" value="1">
           <span class="track"></span>
           Boleh menambah akun sendiri
         </label>
-        <button class="primary" type="submit">Buat</button>
+        <div class="end">
+          <button class="primary" type="submit">Buat</button>
+        </div>
       </form>
-    </section>
+    </dialog>
+    <script>
+      document.getElementById('add-user').addEventListener('click', function (e) {
+        if (e.target === this) this.close();
+      });
+    </script>
 
     {{if .Unassigned}}
     <section class="card">
@@ -191,6 +265,7 @@
       {{end}}
     {{else}}
     <p class="empty">Belum ada user.</p>
+    {{end}}
     {{end}}
   </main>
 </body>
