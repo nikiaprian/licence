@@ -104,7 +104,7 @@
       <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>User</th><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Catatan</th><th></th></tr>
+          <tr><th>User</th><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Catatan</th><th></th><th>EA</th></tr>
         </thead>
         <tbody>
           {{range .Accounts}}
@@ -117,6 +117,16 @@
             <td class="{{.ProfitClass}}">{{.ProfitText}}</td>
             <td>{{.Note}}</td>
             <td>{{.ExpiresText}}</td>
+            <td>
+              <form method="post" action="/admin/licenses/run" class="inline">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <input type="hidden" name="run" value="{{if .Running}}0{{else}}1{{end}}">
+                <input type="hidden" name="tab" value="akun">
+                {{if $.All}}<input type="hidden" name="all" value="1">{{else}}{{if $.From}}<input type="hidden" name="from" value="{{$.From}}">{{end}}{{if $.To}}<input type="hidden" name="to" value="{{$.To}}">{{end}}{{end}}
+                <button type="submit" class="{{if not .Running}}primary{{end}}" title="EA menerapkan perintah ini sekitar 30 detik setelah terhubung">{{if .Running}}Stop{{else}}Start{{end}}</button>
+              </form>
+            </td>
           </tr>
           {{end}}
         </tbody>
@@ -162,7 +172,7 @@
       <p class="meta">Akun ini ada sebelum halaman user. Pindahkan ke user agar muncul di halaman mereka.</p>
       <table>
         <thead>
-          <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th></th></tr>
+          <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th></th><th>EA</th></tr>
         </thead>
         <tbody>
           {{range .Unassigned}}
@@ -188,6 +198,16 @@
               <span class="meta">Buat user dulu.</span>
               {{end}}
             </td>
+            <td>
+              <form method="post" action="/admin/licenses/run" class="inline">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <input type="hidden" name="run" value="{{if .Running}}0{{else}}1{{end}}">
+                {{if $.Open}}<input type="hidden" name="open" value="{{$.Open}}">{{end}}
+                {{if $.All}}<input type="hidden" name="all" value="1">{{else}}{{if $.From}}<input type="hidden" name="from" value="{{$.From}}">{{end}}{{if $.To}}<input type="hidden" name="to" value="{{$.To}}">{{end}}{{end}}
+                <button type="submit" class="{{if not .Running}}primary{{end}}" title="EA menerapkan perintah ini sekitar 30 detik setelah terhubung">{{if .Running}}Stop{{else}}Start{{end}}</button>
+              </form>
+            </td>
           </tr>
           {{end}}
         </tbody>
@@ -197,6 +217,7 @@
 
     {{if .Users}}
       {{range .Users}}
+      {{$owner := .ID}}
       <details class="user" {{if eq $.Open .ID}}open{{end}}>
         <summary>
           <span class="name">
@@ -241,7 +262,7 @@
         {{if .Licenses}}
         <table style="margin-top: 0.9rem;">
           <thead>
-            <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Catatan</th><th></th></tr>
+            <tr><th>Nama</th><th>Akun</th><th>Produk</th><th>Status</th><th>Profit</th><th>Catatan</th><th></th><th>EA</th></tr>
           </thead>
           <tbody>
             {{range .Licenses}}
@@ -253,6 +274,16 @@
               <td class="{{.ProfitClass}}">{{.ProfitText}}{{if .ProfitDay}}<span class="meta"> {{.ProfitDay}}</span>{{end}}</td>
               <td>{{.Note}}</td>
               <td>{{.ExpiresText}}</td>
+              <td>
+                <form method="post" action="/admin/licenses/run" class="inline">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="id" value="{{.ID}}">
+                  <input type="hidden" name="run" value="{{if .Running}}0{{else}}1{{end}}">
+                  <input type="hidden" name="open" value="{{$owner}}">
+                  {{if $.All}}<input type="hidden" name="all" value="1">{{else}}{{if $.From}}<input type="hidden" name="from" value="{{$.From}}">{{end}}{{if $.To}}<input type="hidden" name="to" value="{{$.To}}">{{end}}{{end}}
+                  <button type="submit" class="{{if not .Running}}primary{{end}}" title="EA menerapkan perintah ini sekitar 30 detik setelah terhubung">{{if .Running}}Stop{{else}}Start{{end}}</button>
+                </form>
+              </td>
             </tr>
             {{end}}
           </tbody>

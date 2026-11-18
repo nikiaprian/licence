@@ -84,6 +84,7 @@ func main() {
 	mux.HandleFunc("POST /user/licenses/extend", s.extendLicense)
 	mux.HandleFunc("POST /user/licenses/disable", s.disableLicense)
 	mux.HandleFunc("POST /user/licenses/enable", s.enableLicense)
+	mux.HandleFunc("POST /user/licenses/run", s.userRunLicense)
 	mux.HandleFunc("POST /user/stop-impersonate", s.stopImpersonate)
 	mux.HandleFunc("GET /admin", s.adminPage)
 	mux.HandleFunc("POST /admin/users", s.createUser)
@@ -92,6 +93,7 @@ func main() {
 	mux.HandleFunc("POST /admin/users/delete", s.removeUser)
 	mux.HandleFunc("POST /admin/impersonate", s.impersonate)
 	mux.HandleFunc("POST /admin/licenses/assign", s.assignLicense)
+	mux.HandleFunc("POST /admin/licenses/run", s.adminRunLicense)
 	mux.HandleFunc("POST /api/ea_get_mode", s.eaMode)
 
 	log.Printf("lisensi mendengarkan %s", addr)
@@ -367,6 +369,10 @@ func messageOf(code string) string {
 		return "Kata sandi diubah."
 	case "assigned":
 		return "Lisensi dipindahkan ke user."
+	case "ea-run":
+		return "EA diperintahkan jalan. Akun menerapkannya pada pengecekan berikutnya."
+	case "ea-stop":
+		return "EA diperintahkan berhenti. Akun menerapkannya pada pengecekan berikutnya."
 	case "bad-user":
 		return "Username 3–32 huruf, angka, atau garis bawah. Kata sandi minimal 6 karakter."
 	case "can-add":
@@ -392,7 +398,7 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
 	}
-	from, to, _ := profitFilter(r.URL.Query())
+	from, to, all := profitFilter(r.URL.Query())
 	if err := applyProfitSpan(s.db, from, to, rows); err != nil {
 		http.Error(w, "gagal membaca data", http.StatusInternalServerError)
 		return
@@ -412,6 +418,7 @@ func (s *app) userPage(w http.ResponseWriter, r *http.Request) {
 		"CanAdd":        sess.Impersonating || user.CanAdd,
 		"From":          from,
 		"To":            to,
+		"All":           all,
 		"TotalText":     profitTotalText(rows),
 		"TotalClass":    profitTotalClass(rows),
 	})
@@ -451,6 +458,7 @@ func (s *app) adminPage(w http.ResponseWriter, r *http.Request) {
 		"Open":       openID,
 		"From":       from,
 		"To":         to,
+		"All":        all,
 		"Tab":        tab,
 		"Accounts":   accounts,
 		"TotalText":  profitTotalText(flat),
@@ -869,6 +877,85 @@ func (s *app) assignLicense(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin?msg=assigned", http.StatusSeeOther)
 }
 
+func (s *app) adminRunLicense(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if !s.checkCSRF(r, sess.CSRF) {
+		http.Error(w, "sesi tidak valid", http.StatusBadRequest)
+		return
+	}
+	s.finishRunLicense(w, r, 0, true)
+}
+
+func (s *app) userRunLicense(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.checkCSRF(r, sess.CSRF) {
+		http.Error(w, "sesi tidak valid", http.StatusBadRequest)
+		return
+	}
+	s.finishRunLicense(w, r, sess.UserID, false)
+}
+
+func (s *app) finishRunLicense(w http.ResponseWriter, r *http.Request, userID int64, admin bool) {
+	id, okID := formID(r)
+	run := r.Form.Get("run") == "1"
+	if !okID || setRunning(s.db, id, userID, run) != nil {
+		http.Error(w, "gagal mengubah perintah EA", http.StatusBadRequest)
+		return
+	}
+	msg := "ea-stop"
+	if run {
+		msg = "ea-run"
+	}
+	http.Redirect(w, r, runRedirect(r, msg, admin), http.StatusSeeOther)
+}
+
+func runRedirect(r *http.Request, msg string, admin bool) string {
+	all := r.Form.Get("all") == "1"
+	from, to := "", ""
+	if !all {
+		var ok bool
+		from, ok = parseDate(r.Form.Get("from"))
+		if !ok {
+			from = ""
+		}
+		to, ok = parseDate(r.Form.Get("to"))
+		if !ok {
+			to = ""
+		}
+	}
+	if !admin {
+		q := url.Values{}
+		q.Set("msg", msg)
+		if all {
+			q.Set("all", "1")
+		} else {
+			if from != "" {
+				q.Set("from", from)
+			}
+			if to != "" {
+				q.Set("to", to)
+			}
+		}
+		return "/user?" + q.Encode()
+	}
+	tab := r.Form.Get("tab")
+	if tab != "akun" {
+		tab = "user"
+	}
+	openID, _ := strconv.ParseInt(r.Form.Get("open"), 10, 64)
+	path := adminPath(tab, from, to, openID, all)
+	if strings.Contains(path, "?") {
+		return path + "&msg=" + url.QueryEscape(msg)
+	}
+	return path + "?msg=" + url.QueryEscape(msg)
+}
+
 type eaRequest struct {
 	Account  json.Number `json:"account"`
 	Server   string      `json:"server"`
@@ -920,7 +1007,7 @@ func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
 	if len(server) > 120 {
 		server = server[:120]
 	}
-	status, expires, err := licenseStatus(s.db, account, req.Product, server, cleanAccountName(req.Name))
+	status, expires, mode, err := licenseStatus(s.db, account, req.Product, server, cleanAccountName(req.Name))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Server lisensi bermasalah"})
 		return
@@ -948,7 +1035,7 @@ func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "run", "expires": expires})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "expires": expires})
 	case "expired":
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "Masa sewa EA telah berakhir"})
 	default:

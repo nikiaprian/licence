@@ -30,6 +30,7 @@ type License struct {
 	ProfitCurrency string
 	ProfitAt       string
 	UserID         int64
+	Running        bool
 }
 
 func (l License) NameText() string {
@@ -102,6 +103,7 @@ CREATE TABLE IF NOT EXISTS users (
 		{"licenses", "user_id", "INTEGER NOT NULL DEFAULT 0"},
 		{"licenses", "account_name", "TEXT NOT NULL DEFAULT ''"},
 		{"users", "can_add", "INTEGER NOT NULL DEFAULT 0"},
+		{"licenses", "running", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := addColumn(db, col.table, col.name, col.decl); err != nil {
 			db.Close()
@@ -359,7 +361,7 @@ func saveLicense(db *sql.DB, userID, account int64, product, expires, note strin
 
 func listLicenses(db *sql.DB, userID int64) ([]License, error) {
 	query := `SELECT id, account, product, expires, note, active, server_name, account_name, created_at,
-		profit, profit_day, profit_currency, profit_at, user_id
+		profit, profit_day, profit_currency, profit_at, user_id, running
 		FROM licenses`
 	var rows *sql.Rows
 	var err error
@@ -375,12 +377,13 @@ func listLicenses(db *sql.DB, userID int64) ([]License, error) {
 	var out []License
 	for rows.Next() {
 		var l License
-		var active int
+		var active, running int
 		if err := rows.Scan(&l.ID, &l.Account, &l.Product, &l.Expires, &l.Note, &active, &l.ServerName, &l.AccountName, &l.CreatedAt,
-			&l.Profit, &l.ProfitDay, &l.ProfitCurrency, &l.ProfitAt, &l.UserID); err != nil {
+			&l.Profit, &l.ProfitDay, &l.ProfitCurrency, &l.ProfitAt, &l.UserID, &running); err != nil {
 			return nil, err
 		}
 		l.Active = active == 1
+		l.Running = running == 1
 		out = append(out, l)
 	}
 	return out, rows.Err()
@@ -587,27 +590,58 @@ func setActive(db *sql.DB, id, userID int64, active bool) error {
 	return nil
 }
 
-// licenseStatus: ok, missing, expired.
-func licenseStatus(db *sql.DB, account int64, product, server, accountName string) (string, string, error) {
-	var id int64
-	var expires string
-	var active int
-	err := db.QueryRow(`SELECT id, expires, active FROM licenses WHERE account=? AND product=?`, account, product).
-		Scan(&id, &expires, &active)
-	if err == sql.ErrNoRows || (err == nil && active != 1) {
-		return "missing", "", nil
+func setRunning(db *sql.DB, id, userID int64, running bool) error {
+	v := 0
+	if running {
+		v = 1
+	}
+	var (
+		res sql.Result
+		err error
+	)
+	if userID > 0 {
+		res, err = db.Exec(`UPDATE licenses SET running=? WHERE id=? AND user_id=?`, v, id, userID)
+	} else {
+		res, err = db.Exec(`UPDATE licenses SET running=? WHERE id=?`, v, id)
 	}
 	if err != nil {
-		return "", "", err
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("lisensi tidak ditemukan")
+	}
+	return nil
+}
+
+// licenseStatus: ok, missing, expired. mode is run or stop when status is ok.
+func licenseStatus(db *sql.DB, account int64, product, server, accountName string) (string, string, string, error) {
+	var id int64
+	var expires string
+	var active, running int
+	err := db.QueryRow(`SELECT id, expires, active, running FROM licenses WHERE account=? AND product=?`, account, product).
+		Scan(&id, &expires, &active, &running)
+	if err == sql.ErrNoRows || (err == nil && active != 1) {
+		return "missing", "", "", nil
+	}
+	if err != nil {
+		return "", "", "", err
 	}
 	today := time.Now().UTC().Format("2006-01-02")
 	if expires < today {
-		return "expired", expires, nil
+		return "expired", expires, "", nil
 	}
 	if accountName != "" {
 		_, _ = db.Exec(`UPDATE licenses SET server_name=?, account_name=? WHERE id=?`, server, accountName, id)
 	} else {
 		_, _ = db.Exec(`UPDATE licenses SET server_name=? WHERE id=?`, server, id)
 	}
-	return "ok", expires, nil
+	mode := "stop"
+	if running == 1 {
+		mode = "run"
+	}
+	return "ok", expires, mode, nil
 }
