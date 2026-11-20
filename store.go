@@ -590,6 +590,25 @@ func setActive(db *sql.DB, id, userID int64, active bool) error {
 	return nil
 }
 
+func setRunningByAccount(db *sql.DB, account int64, product string, running bool) error {
+	v := 0
+	if running {
+		v = 1
+	}
+	res, err := db.Exec(`UPDATE licenses SET running=? WHERE account=? AND product=? AND active=1`, v, account, product)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("lisensi tidak ditemukan")
+	}
+	return nil
+}
+
 func setRunning(db *sql.DB, id, userID int64, running bool) error {
 	v := 0
 	if running {

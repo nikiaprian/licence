@@ -962,6 +962,7 @@ type eaRequest struct {
 	Name     string      `json:"name"`
 	Product  string      `json:"product"`
 	Pass     string      `json:"pass"`
+	SetMode  string      `json:"set_mode"`
 	Day      string      `json:"day"`
 	Profit   json.Number `json:"profit"`
 	Currency string      `json:"currency"`
@@ -1014,6 +1015,13 @@ func (s *app) eaMode(w http.ResponseWriter, r *http.Request) {
 	}
 	switch status {
 	case "ok":
+		if req.SetMode == "run" || req.SetMode == "stop" {
+			if err := setRunningByAccount(s.db, account, req.Product, req.SetMode == "run"); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Server lisensi bermasalah"})
+				return
+			}
+			mode = req.SetMode
+		}
 		if len(req.Days) > 0 {
 			days, valid := parseProfitDays(req)
 			if !valid {
